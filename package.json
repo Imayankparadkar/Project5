@@ -1,0 +1,22 @@
+{
+  "name": "funngro-backend-assessment",
+  "version": "1.0.0",
+  "description": "Funngro Backend Engineering Assessment — Node.js / MongoDB",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node src/setup/seed.js",
+    "test": "node test/run-all-tests.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^6.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Mayank",
+  "license": "UNLICENSED"
+}
