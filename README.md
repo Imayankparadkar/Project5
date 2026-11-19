@@ -1,4 +1,3 @@
-# Funngro Backend Engineering Assessment
 **Role:** Backend Engineer (Node.js / MongoDB)  
 **Candidate:** Mayank  
 **Evaluation Criteria Addressed:** Severity-ordered bug analysis, money-path correctness, MongoDB index & aggregation design, incident triage instincts, and system scale architecture.
