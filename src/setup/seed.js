@@ -32,7 +32,8 @@ async function seed() {
     'PointWallets',
     'PointTransactions',
     'PointConversionRates',
-    'ProcessedWebhookEvents'
+    'ProcessedWebhookEvents',
+    'DailyWithdrawalLimits'
   ];
 
   for (const col of collections) {

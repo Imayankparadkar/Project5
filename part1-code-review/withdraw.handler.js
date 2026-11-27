@@ -4,8 +4,22 @@ const crypto = require('crypto');
 const { ObjectId } = require('mongodb');
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+// ₹2,000 per-user daily withdrawal limit (calendar day, IST timezone)
+const DAILY_LIMIT_PAISE = 200000;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Returns today's date string in IST (UTC+5:30), e.g. "2026-11-27".
+// IST day boundary is the partition key for per-user daily limit counters.
+function getISTDateString() {
+  const istOffsetMs = (5 * 60 + 30) * 60 * 1000;
+  return new Date(Date.now() + istOffsetMs).toISOString().slice(0, 10);
+}
 
 /**
  * Normalizes MongoDB driver v5 ({ value: doc }) vs v6 (doc directly) return shape.
@@ -103,9 +117,10 @@ async function withdraw(req, res) {
   }
 
   // ── Step 5: Atomic Multi-Document Transaction ─────────────────────────────
-  // Commits: Wallet Debit + PayoutRequest (PENDING_DISPATCH) + Ledger Entry
+  // Commits: Daily Limit Reservation + Wallet Debit + PayoutRequest + Ledger Entry
   const payoutId = new ObjectId();
   const reference = `WD-${payoutId.toString()}`;
+  const todayIST = getISTDateString();
   let newBalance;
 
   try {
@@ -123,7 +138,31 @@ async function withdraw(req, res) {
         return { isDuplicate: true, payout: inTxExisting };
       }
 
-      // 5b. Atomic Conditional Balance Decrement (Eliminates TOCTOU Race Condition)
+      // 5b. Atomic Daily Withdrawal Limit (IST Calendar Day)
+      // Pattern: $inc the counter first, then check the new total.
+      // On replica set: transaction rollback undoes the $inc if limit exceeded.
+      // On standalone: manual compensation before throw.
+      const rawLimit = await db.collection('DailyWithdrawalLimits').findOneAndUpdate(
+        { userId: String(userId), date: todayIST },
+        {
+          $inc: { totalWithdrawnPaise: amountPaise },
+          $setOnInsert: { userId: String(userId), date: todayIST, createdAt: new Date() }
+        },
+        { upsert: true, returnDocument: 'after', session }
+      );
+      const limitDoc = extractDoc(rawLimit);
+
+      if (limitDoc.totalWithdrawnPaise > DAILY_LIMIT_PAISE) {
+        if (!session) {
+          await db.collection('DailyWithdrawalLimits').updateOne(
+            { userId: String(userId), date: todayIST },
+            { $inc: { totalWithdrawnPaise: -amountPaise } }
+          );
+        }
+        throw new Error('DAILY_LIMIT_EXCEEDED');
+      }
+
+      // 5c. Atomic Conditional Balance Decrement (Eliminates TOCTOU Race Condition)
       const rawWallet = await db.collection('Wallets').findOneAndUpdate(
         { userId: String(userId), balance: { $gte: amountPaise } },
         { $inc: { balance: -amountPaise }, $set: { updatedAt: new Date() } },
@@ -131,10 +170,17 @@ async function withdraw(req, res) {
       );
       const wallet = extractDoc(rawWallet);
       if (!wallet) {
+        // Standalone: reverse daily limit since wallet debit failed
+        if (!session) {
+          await db.collection('DailyWithdrawalLimits').updateOne(
+            { userId: String(userId), date: todayIST },
+            { $inc: { totalWithdrawnPaise: -amountPaise } }
+          );
+        }
         throw new Error('INSUFFICIENT_BALANCE');
       }
 
-      // 5c. Insert Payout Record in PENDING_DISPATCH
+      // 5d. Insert Payout Record in PENDING_DISPATCH
       await db.collection('PayoutRequests').insertOne({
         _id: payoutId,
         userId: String(userId),
@@ -185,6 +231,15 @@ async function withdraw(req, res) {
     newBalance = txResult.balance;
 
   } catch (err) {
+    if (err.message === 'DAILY_LIMIT_EXCEEDED') {
+      return res.status(429).json({
+        error: 'DAILY_LIMIT_EXCEEDED',
+        message: `Daily withdrawal limit of ₹${DAILY_LIMIT_PAISE / 100} reached. Resets at midnight IST.`,
+        limitPaise: DAILY_LIMIT_PAISE,
+        limitINR: (DAILY_LIMIT_PAISE / 100).toFixed(2)
+      });
+    }
+
     if (err.message === 'INSUFFICIENT_BALANCE') {
       return res.status(400).json({
         error: 'INSUFFICIENT_BALANCE',

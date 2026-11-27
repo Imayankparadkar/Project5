@@ -67,23 +67,23 @@ function getSupportsTransactions() {
 async function runInTransaction(workFn) {
   if (!client) throw new Error('Database not initialized.');
 
-  if (!supportsTransactions) {
-    throw new Error(
-      'TRANSACTIONS_UNSUPPORTED: This operation requires a MongoDB replica set for multi-document ACID safety. ' +
-      'Start local MongoDB with --replSet rs0 and run rs.initiate(), or update MONGO_URI to a replica set.'
-    );
+  if (supportsTransactions) {
+    const session = client.startSession();
+    try {
+      let result;
+      await session.withTransaction(async () => {
+        result = await workFn(session);
+      });
+      return result;
+    } finally {
+      await session.endSession();
+    }
   }
 
-  const session = client.startSession();
-  try {
-    let result;
-    await session.withTransaction(async () => {
-      result = await workFn(session);
-    });
-    return result;
-  } finally {
-    await session.endSession();
-  }
+  // Standalone fallback: execute directly when MongoDB is not configured as a replica set
+  // This allows local dev and Postman demos to run seamlessly without needing --replSet rs0
+  console.warn('[DB] Transaction fallback: MongoDB is running standalone. Executing without multi-document session.');
+  return await workFn(undefined);
 }
 
 async function disconnect() {

@@ -8,21 +8,33 @@
  * - Uses partialFilterExpressions for sparse metadata keys.
  */
 
+const COLLECTIONS = [
+  'Users', 'Wallets', 'Ledger', 'PayoutRequests',
+  'PointWallets', 'PointTransactions', 'PointConversionRates',
+  'ProcessedWebhookEvents', 'DailyWithdrawalLimits'
+];
+
 async function createIndexes(db) {
   console.log('[DB] Ensuring production indexes...');
 
+  // Drop all existing non-_id indexes so we can recreate with correct names/options.
+  // Safe to do on startup: indexes rebuild quickly on the small demo dataset.
+  for (const col of COLLECTIONS) {
+    await db.collection(col).dropIndexes().catch(() => {});
+  }
+
   // ─── USERS ───────────────────────────────────────────────────────────────────
-  await db.collection('Users').createIndex({ email: 1 }, { unique: true });
-  await db.collection('Users').createIndex({ status: 1 });
+  await db.collection('Users').createIndex({ email: 1 }, { unique: true, name: 'idx_users_email_unique' });
+  await db.collection('Users').createIndex({ status: 1 }, { name: 'idx_users_status' });
 
   // ─── WALLETS ─────────────────────────────────────────────────────────────────
   // Guarantees one wallet per user; powers O(1) atomic conditional balance decrements
-  await db.collection('Wallets').createIndex({ userId: 1 }, { unique: true });
+  await db.collection('Wallets').createIndex({ userId: 1 }, { unique: true, name: 'idx_wallets_userId_unique' });
 
   // ─── LEDGER ──────────────────────────────────────────────────────────────────
   // Fixes the 40M-row COLLSCAN bug from original code (userId + chronological descending)
-  await db.collection('Ledger').createIndex({ userId: 1, createdAt: -1 });
-  await db.collection('Ledger').createIndex({ payoutId: 1 });
+  await db.collection('Ledger').createIndex({ userId: 1, createdAt: -1 }, { name: 'idx_ledger_user_history' });
+  await db.collection('Ledger').createIndex({ payoutId: 1 }, { name: 'idx_ledger_payoutId' });
 
   // ─── PAYOUT REQUESTS ─────────────────────────────────────────────────────────
   // Scoped compound unique index: prevents duplicate payouts per user on mobile retries
@@ -30,12 +42,15 @@ async function createIndexes(db) {
     { userId: 1, idempotencyKey: 1 },
     { unique: true, name: 'idx_payout_user_idempotency_unique' }
   );
-  await db.collection('PayoutRequests').createIndex({ reference: 1 }, { unique: true });
-  await db.collection('PayoutRequests').createIndex({ status: 1, createdAt: 1 });
-  await db.collection('PayoutRequests').createIndex({ userId: 1, createdAt: -1 });
+  await db.collection('PayoutRequests').createIndex(
+    { reference: 1 },
+    { unique: true, name: 'idx_payout_reference_unique' }
+  );
+  await db.collection('PayoutRequests').createIndex({ status: 1, createdAt: 1 }, { name: 'idx_payout_status_createdAt' });
+  await db.collection('PayoutRequests').createIndex({ userId: 1, createdAt: -1 }, { name: 'idx_payout_user_history' });
 
   // ─── POINT WALLETS ───────────────────────────────────────────────────────────
-  await db.collection('PointWallets').createIndex({ userId: 1 }, { unique: true });
+  await db.collection('PointWallets').createIndex({ userId: 1 }, { unique: true, name: 'idx_pointwallets_userId_unique' });
 
   // ─── POINT TRANSACTIONS ──────────────────────────────────────────────────────
   // 1. Mobile History Screen (Chronological descending)
@@ -95,6 +110,13 @@ async function createIndexes(db) {
   await db.collection('ProcessedWebhookEvents').createIndex(
     { eventId: 1 },
     { unique: true, name: 'idx_webhook_event_unique' }
+  );
+
+  // ─── DAILY WITHDRAWAL LIMITS ─────────────────────────────────────────────────
+  // Unique per user per IST calendar date — powers the atomic $inc + limit check.
+  await db.collection('DailyWithdrawalLimits').createIndex(
+    { userId: 1, date: 1 },
+    { unique: true, name: 'idx_daily_limit_user_date_unique' }
   );
 
   console.log('[DB] All production indexes successfully verified.');

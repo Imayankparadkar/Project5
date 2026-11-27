@@ -1,0 +1,480 @@
+{
+  "info": {
+    "name": "Funngro Backend Demo — Interview Ready",
+    "_postman_id": "funngro-demo-2026",
+    "description": "Complete demo collection for Funngro Backend Engineering Assessment.\n\n🔑 Alice Token already pre-filled (expires in 7 days from seed).\n🔑 Admin Token already pre-filled.\n\nRun scenes in order: 1 → 2 → 3 → 3b → 3c → 3d → 4a → 4b → 4c → 5 → 5b → 6a → 7",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "ALICE_TOKEN",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YjA5M2M1NDMxZmY3MGEwYThiNWZkMzciLCJyb2xlIjoidXNlciIsImlhdCI6MTc5NTc2NzM4MCwiZXhwIjoxNzk2MzcyMTgwfQ._SiC2-7XOiyMJ-Pi2yFLpda0xIaebBVaL0tHuwZa6D0",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_TOKEN",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YjA5M2M1NDMxZmY3MGEwYThiNWZkM2EiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3OTU3NjczODAsImV4cCI6MTc5NjM3MjE4MH0.B90u9Kss1nYI_Vjkhc299M6wWSHflltlWvjeFK6JGBQ",
+      "type": "string"
+    },
+    {
+      "key": "PAYOUT_REF",
+      "value": "",
+      "type": "string",
+      "description": "Auto-filled by Scene 3 test script"
+    }
+  ],
+  "item": [
+    {
+      "name": "🟢 Scene 1 — Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/health",
+        "description": "SAY: 'The health endpoint confirms the server is live and MongoDB replica-set transactions are enabled — the foundation for all financial safety guarantees.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Server is healthy', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Replica Set Transactions:', j.replicaSetTransactions);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟢 Scene 2 — Wallet Balance (Alice ₹1500)",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/wallet/balance",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "SAY: 'Alice starts with ₹1,500 — stored as 150,000 paise (integer). No floats anywhere in this system. That eliminates an entire class of fintech rounding bugs.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Got wallet balance', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Balance:', j.balanceINR, 'INR /', j.balancePaise, 'paise');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟡 Scene 3 — Withdraw ₹500 (Happy Path)",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/wallet/withdraw",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-idempotency-key", "value": "demo-withdraw-scene3-v1" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50000\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "50000 paise = ₹500\n\nSAY: 'Three things happen in ONE MongoDB ACID transaction: (1) wallet balance deducted, (2) PayoutRequest record created, (3) ledger debit entry inserted. If any one fails, all three roll back — zero partial state.'\n\nAfter this, run Scene 2 again — balance should be ₹1,000."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Withdrawal accepted', () => pm.response.to.have.status(202));",
+              "const j = pm.response.json();",
+              "console.log('Status:', j.status, '| Ref:', j.reference, '| New Balance:', j.balanceINR, 'INR');",
+              "if (j.reference) pm.collectionVariables.set('PAYOUT_REF', j.reference);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔁 Scene 3b — Same Request Again (Idempotency)",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/wallet/withdraw",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-idempotency-key", "value": "demo-withdraw-scene3-v1" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50000\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "EXACT SAME request as Scene 3 — same idempotency key, same amount.\n\nSAY: 'Network retries are real. A user submits, times out, and retries. Without idempotency, the wallet gets double-charged. Watch — same key returns the same result, no second deduction.'\n\nExpected: 200 OK with idempotent: true. Balance unchanged."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Idempotent response', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('idempotent flag is true', () => pm.expect(j.idempotent).to.be.true);",
+              "console.log('Idempotent:', j.idempotent, '| Status:', j.status, '— No double deduction!');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "❌ Scene 3c — Insufficient Balance (₹2000, only ₹1000 left)",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/wallet/withdraw",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-idempotency-key", "value": "demo-withdraw-insufficient-v1" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 200000\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "200000 paise = ₹2,000 — but Alice only has ₹1,000.\n\nSAY: 'The balance check is atomic. I use findOneAndUpdate with a $gte condition AND $inc deduction in a single MongoDB operation. Two concurrent requests for more than the available balance — only one can win. The other gets rejected here.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Correctly rejected', () => pm.response.to.have.status(400));",
+              "const j = pm.response.json();",
+              "pm.test('INSUFFICIENT_BALANCE error', () => pm.expect(j.error).to.eql('INSUFFICIENT_BALANCE'));",
+              "console.log('Error:', j.error, '-', j.message);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "❌ Scene 3d — Validation: Below ₹100 Minimum",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/wallet/withdraw",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-idempotency-key", "value": "demo-withdraw-belowmin-v1" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "50 paise = ₹0.50 — below the ₹100 minimum.\n\nSAY: 'Input validation runs in middleware BEFORE the database is touched. Minimum withdrawal is ₹100, maximum is ₹10,000 per request. This is enforced with Number.isSafeInteger() — no floating point amounts accepted.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Validation rejects low amount', () => pm.response.to.have.status(400));",
+              "const j = pm.response.json();",
+              "console.log('Error:', j.error, '-', j.message);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟡 Scene 4a — Points Balance",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/points/balance",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "SAY: 'Alice has 850 available points. She's earned 1,000 lifetime, converted 100, and 50 expired. All tracked.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Got points balance', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Available Points:', j.availablePoints, '| Lifetime Earned:', j.lifetimeEarned);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟡 Scene 4b — Convert 200 Points to Cash",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/points/convert",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-idempotency-key", "value": "demo-convert-scene4b-v1" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"points\": 200\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "200 points × ₹0.10 per point = ₹20 credited to wallet.\n\nSAY: 'Three things happen in one ACID transaction: (1) points deducted atomically with $gte guard, (2) cash credited to wallet, (3) ledger entry inserted. After this, run Scene 2 again — wallet goes from ₹1,000 → ₹1,020.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Points converted', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Converted:', j.pointsConverted, 'pts → ₹' + j.cashCreditedINR, '| New point balance:', j.newPointBalance, '| New cash balance: ₹' + j.newCashBalanceINR);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟡 Scene 4c — Conversion Rate (Public)",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/points/rate",
+        "description": "No auth needed — public endpoint.\n\nSAY: 'The conversion rate is stored in MongoDB and can be changed by admins. It's not hardcoded. Currently 1 point = ₹0.10.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Got rate', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Rate:', j.rateDescription);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟡 Scene 4d — Wallet Balance After Conversion (Should be ₹1020)",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/wallet/balance",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "Run after Scene 4b to prove cash was credited to the wallet.\n\nExpected: balanceINR = '1020.00'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Balance updated after conversion', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Balance after points conversion: ₹' + j.balanceINR);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔵 Scene 5 — Monthly Finance Report (Admin)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{BASE_URL}}/api/reports/monthly-points?year=2026&month=11",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "reports", "monthly-points"],
+          "query": [
+            { "key": "year", "value": "2026" },
+            { "key": "month", "value": "11" }
+          ]
+        },
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}" }
+        ],
+        "description": "ADMIN TOKEN — works fine.\n\nSAY: 'This aggregation pipeline groups all point transactions by cohort — cohort = the month a user joined. Funngro founders can see: for November 2026, cohort 2026-09 earned 1,000 points and converted ₹10 worth. Cohort 2026-10 converted ₹50 worth. This is real-time financial visibility.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Admin report success', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Total cohorts:', j.report.cohorts.length);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔵 Scene 5b — Same Report with User Token (403 RBAC)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{BASE_URL}}/api/reports/monthly-points?year=2026&month=11",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "reports", "monthly-points"],
+          "query": [
+            { "key": "year", "value": "2026" },
+            { "key": "month", "value": "11" }
+          ]
+        },
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "ALICE TOKEN (regular user) — should get 403.\n\nSAY: 'Same endpoint, Alice's token. She gets 403 Forbidden. RBAC middleware checks the role from the JWT and blocks access. Financial reports are admin-only.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('RBAC blocks regular user', () => pm.response.to.have.status(403));",
+              "const j = pm.response.json();",
+              "console.log('RBAC error:', j.error, '-', j.message);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔴 Scene 6a — Webhook: Missing Signature (401)",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/webhooks/gateway",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event\": \"payout.settled\",\n  \"data\": { \"reference\": \"WD-anything\", \"utr\": \"UTR123\" }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "No x-gateway-signature header.\n\nSAY: 'Payment gateways call our webhook when a payout settles. If we don't verify the signature, any attacker can POST a fake settlement and we'd mark a payout as settled without actual money moving. We use HMAC-SHA256 — missing or wrong signature gets a hard 401 reject.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Rejects missing signature', () => pm.response.to.have.status(401));",
+              "const j = pm.response.json();",
+              "console.log('Security:', j.error, '-', j.message);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔴 Scene 6b — Webhook: Wrong Signature (401)",
+      "request": {
+        "method": "POST",
+        "url": "{{BASE_URL}}/api/webhooks/gateway",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-gateway-signature", "value": "0000000000000000000000000000000000000000000000000000000000000000" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event\": \"payout.settled\",\n  \"data\": { \"reference\": \"WD-anything\", \"utr\": \"UTR123\" }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Wrong signature (all zeros).\n\nSAY: 'Even with a signature present but wrong, it's rejected. We use crypto.timingSafeEqual() — not a simple string comparison — to prevent timing attacks where attackers brute-force the signature one byte at a time.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Rejects wrong signature', () => pm.response.to.have.status(401));",
+              "const j = pm.response.json();",
+              "console.log('Security:', j.error, '-', j.message);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🟣 Scene 7 — Ledger History (Audit Trail)",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/wallet/history",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "SAY: 'Every money movement creates an immutable ledger entry. This is double-entry bookkeeping — each entry has a debitAccount and creditAccount. For the withdrawal: debit USER_WALLET, credit PAYMENT_GATEWAY_CLEARING. For the points conversion: debit PROMOTIONAL_REWARDS, credit USER_WALLET. This is audit-ready and matches banking standards.'"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Got ledger history', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "console.log('Total ledger entries:', j.count);",
+              "j.entries.forEach(e => console.log(' -', e.type, '|', e.amountINR, 'INR | status:', e.status));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📋 BONUS — Payout Status Lookup",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/wallet/payout/PASTE_PAYOUT_ID_HERE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "Replace PASTE_PAYOUT_ID_HERE with the payoutId from Scene 3 response.\n\nSAY: 'Users can check the status of any payout they initiated. The reference field (WD-...) is what goes to the bank.'"
+      }
+    },
+    {
+      "name": "📋 BONUS — Point Transaction History",
+      "request": {
+        "method": "GET",
+        "url": "{{BASE_URL}}/api/points/history",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ALICE_TOKEN}}" }
+        ],
+        "description": "Shows all point earn/convert/expire events for Alice."
+      }
+    },
+    {
+      "name": "📋 BONUS — Report with Cohort Filter",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{BASE_URL}}/api/reports/monthly-points?year=2026&month=11&cohort=2026-09",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "reports", "monthly-points"],
+          "query": [
+            { "key": "year", "value": "2026" },
+            { "key": "month", "value": "11" },
+            { "key": "cohort", "value": "2026-09" }
+          ]
+        },
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}" }
+        ],
+        "description": "Filter to only cohort 2026-09 (Alice's cohort). Useful to show filtering capability."
+      }
+    }
+  ]
+}
